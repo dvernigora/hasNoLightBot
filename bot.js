@@ -183,11 +183,12 @@ bot.command('get', async (ctx) => {
             const date = new Date(data.data[0]['SearchDate']);
             const today = schedule.find(day => day['IsToday']);
             const title = data.data[0]['SheduleTitle'];
+            const minutes = date.getMinutes().length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
 
             let message = `${title} \n`
             message = message.replace('<b>', '');
             message = message.replace('</b>', '');
-            message += `Станом на ${date.getHours()}:${date.getMinutes()} графік такий: \n \n`;
+            message += `Станом на ${date.getHours()}:${minutes} графік такий: \n \n`;
             message += parseSchedule(today);
             message += '\n Натисніть команду /get щоб перевірити знову.'
 
@@ -201,5 +202,5 @@ bot.command('get', async (ctx) => {
 });
 
 bot.launch();
-console.log('Bot is running...');
+console.log('Bot is running.');
 
