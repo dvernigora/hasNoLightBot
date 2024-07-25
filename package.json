@@ -6,10 +6,11 @@
     "start": "node bot.js"
   },
   "engines": {
-    "node": "16.14.2",
+    "node": "17.0",
     "npm": "8.1"
   },
   "dependencies": {
+    "node-cron": "^3.0.3",
     "node-fetch": "^2.6.1",
     "telegraf": "^4.0.0"
   }
