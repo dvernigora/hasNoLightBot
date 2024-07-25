@@ -218,7 +218,7 @@ const runParse = async (params = {}) => {
             ctx.reply('Пробачте. Я можу дати інформацію тільки в рамках цього тижня. З понеділка можна буде перевіряти графіки на наступний день.');
             return;
         }
-        dayToRender = schedule.find(day => day['DayNo'] === tomorowDayNum);
+        dayToRender = schedule.find(day => day['DayNo'] === (tomorowDayNum + 1));
     }
 
     const date = new Date(data['SearchDate']);
