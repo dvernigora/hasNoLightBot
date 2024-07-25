@@ -1,5 +1,7 @@
 const { Telegraf } = require('telegraf');
 const fetch = require('node-fetch');
+const fs = require('node:fs/promises');
+const cron = require('node-cron');
 
 const bot = new Telegraf('7288487795:AAGIeSjEzyoV9wejKTHg36thAm7BOyFIXF4');
 const url = 'https://kiroe.com.ua/electricity-blackout/websearch/100776?ajax=1';
@@ -171,36 +173,113 @@ const parseSchedule = schedule => {
     return message;
 };
 
-bot.start((ctx) => ctx.reply('Привіт! Я бот, який підкаже графік погодинних відключень у садовому товаристві "Ятрань". Натисніть команду /get щоб дізнатися графік.'));
-
-bot.command('get', async (ctx) => {
-
+const getSchedule = async ctx => {
     try {
         const response = await fetch(url);
+
         if (response.ok) {
             const data = await response.json();
-            const schedule = data.data[0]['Shedule'];
-            const date = new Date(data.data[0]['SearchDate']);
-            const today = schedule.find(day => day['IsToday']);
-            const title = data.data[0]['SheduleTitle'];
-            const minutes = date.getMinutes().length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
-
-            let message = `${title} \n`
-            message = message.replace('<b>', '');
-            message = message.replace('</b>', '');
-            message += `Станом на ${date.getHours()}:${minutes} графік такий: \n \n`;
-            message += parseSchedule(today);
-            message += '\n Натисніть команду /get щоб перевірити знову.'
-
-            ctx.reply(message);
+            return data.data[0];
         } else {
             ctx.reply('Не вдалося отримати дані. Спробуйте пізніше.');
+            return {};
         }
     } catch (error) {
         ctx.reply(`Сталася помилка: ${error.message}`);
+        return {};
+    }
+};
+
+const getIsScheduleWasChanged = async schedule => {
+    try {
+        const dbContent = await fs.readFile('./db.json', { encoding: 'utf8' });
+        const dataFromDb = JSON.parse(dbContent);
+
+        const today = schedule.find(day => day['IsToday']);
+        const todayStr = JSON.stringify(today);
+
+        return dbContent !== todayStr && dataFromDb.DayName === today.DayName;
+    } catch (e) {
+        console.log(e);
+    }
+};
+
+const runParse = async (params = {}) => {
+    const { isParseByCron, ctx, isGetTomorow } = params;
+    const lastDayNum = 7;
+    const data = await getSchedule(ctx);
+    const schedule = data['Shedule'];
+    const today = schedule.find(day => day['IsToday']);
+    const tomorowDayNum = today['DayNo'];
+
+    let dayToRender = today;
+    if (isGetTomorow) {
+        if (tomorowDayNum === lastDayNum) {
+            ctx.reply('Пробачте. Я можу дати інформацію тільки в рамках цього тижня. З понеділка можна буде перевіряти графіки на наступний день.');
+            return;
+        }
+        dayToRender = schedule.find(day => day['DayNo'] === tomorowDayNum);
+    }
+
+    const date = new Date(data['SearchDate']);
+    const title = data['SheduleTitle'];
+    const minutes = date.getMinutes() + '';
+    const minutesModified = minutes.length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
+    const dateToRender = isGetTomorow ? `На ${dayToRender['DayName']}` : `Станом на ${date.getHours()}:${minutesModified}`;
+    const isScheduleWasChanged = await getIsScheduleWasChanged(schedule);
+
+    let message = isScheduleWasChanged && !isGetTomorow ? `Змінився графік погодинних відключень! \n` : '';
+    // message += `${title} \n`
+    // message = message.replace('<b>', '');
+    // message = message.replace('</b>', '');
+    message += `${dateToRender} графік такий: \n \n`;
+    message += parseSchedule(dayToRender);
+    message += '\nЯкщо графік зміниться, я повідомлю Вас про це.';
+    message += '\n\nКоманди:';
+    message += '\n/get - знову перевірити графік на сьогодні;';
+    message += '\n/getTomorow - графік відключень на завтра;';
+    message += '\n/stop - я не буду сповіщати Вас про зміну графіків.';
+
+    if (isParseByCron) {
+        if (isScheduleWasChanged) {
+            ctx.reply(message);
+        }
+    } else {
+        ctx.reply(message);
+    }
+
+    try {
+        await fs.writeFile('./db.json', JSON.stringify(today));
+    } catch (e) {
+        console.error(`cant write database ${e}`)
+    }
+};
+
+bot.start((ctx) => ctx.reply('Привіт! Я бот, який підкаже графік погодинних відключень у садовому товаристві "Ятрань". Натисніть команду /get щоб дізнатися графік.'));
+
+let cronTask = null;
+bot.command('get', async ctx => {
+    await runParse({ isParseByCron: false, ctx });
+
+    if (!cronTask) {
+        cronTask = cron.schedule('*/4 * * * *', async () => {
+            await runParse({ isParseByCron: true, ctx });
+        });
+    }
+});
+bot.command('getTomorow', async ctx => {
+    await runParse({ isParseByCron: false, ctx, isGetTomorow: true });
+});
+
+bot.command('stop', async (ctx) => {
+    ctx.reply('Я припиняю слідкувати за змінами у графіках. Що б знову запустити мене, натисніть команду /get');
+    if (cronTask) {
+        cronTask.stop();
+        cronTask = null;
     }
 });
 
 bot.launch();
 console.log('Bot is running.');
+
 
