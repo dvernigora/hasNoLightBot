@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const cron = require('node-cron');
 
 const bot = new Telegraf('7288487795:AAGIeSjEzyoV9wejKTHg36thAm7BOyFIXF4');
-const url = 'https://kiroe.com.ua/electricity-blackout/websearch/100776?ajax=1';
+const url = 'https://kiroe.com.ua/electricity-blackout/websearch/v2/110686?ajax=1';
 
 const time = {
     'H01': {
@@ -137,16 +137,26 @@ const schedule = {
 
 
 
-const parseSchedule = schedule => {
-    let isSwitchedLight = schedule['H01'];
+
+
+const parseSchedule = ({ dayToRender, isShowJustNoLight }) => {
+    let isSwitchedLight = dayToRender['H01'];
     let message = '';
 
     Object.entries(time).forEach(([currentHourName, currentHourVal], i) => {
-        currentHourVal.hasLight = schedule[currentHourName];
+        currentHourVal.hasLight = dayToRender[currentHourName];
     });
 
     let firstPeriod = '';
     let secondPeriod = '';
+
+    const hasNolight = Object.entries(time).some(([periodName,period]) => {
+        return !period.hasLight;
+    });
+
+    if (!hasNolight) {
+
+    }
 
     Object.entries(time).forEach(([periodName,period]) => {
         const nextIndex = Object.keys(time).findIndex(name => name === periodName) + 1;
@@ -163,8 +173,16 @@ const parseSchedule = schedule => {
 
         if (isSwitchedLight !== nextPeriod.hasLight) {
             secondPeriod = nextPeriod.start;
-            const hasLightStr = period.hasLight ? '+ +' : '- - -';
-            message += `з ${firstPeriod} до ${secondPeriod} ${hasLightStr} \n`
+
+            if (isShowJustNoLight) {
+                if (!period.hasLight) {
+                    message += `з ${firstPeriod} до ${secondPeriod} \n`
+                }
+            } else {
+                const hasLightStr = period.hasLight ? '+ +' : '- - -';
+                message += `з ${firstPeriod} до ${secondPeriod} ${hasLightStr} \n`
+            }
+
             isSwitchedLight = nextPeriod.hasLight;
             firstPeriod = '';
         }
@@ -204,7 +222,18 @@ const getIsScheduleWasChanged = async schedule => {
     }
 };
 
+const buttons = {
+    reply_markup: {
+        inline_keyboard: [
+            [ { text: "Графік на сьогодні", callback_data: 'get' }, { text: 'Графік на завтра', callback_data: 'getTomorow' } ],
+            [ { text: 'Не сповіщати про зміни у графіку', callback_data: 'stop' } ],
+        ]
+    }
+};
+
 const runParse = async (params = {}) => {
+    const isShowJustNoLight = true;
+
     const { isParseByCron, ctx, isGetTomorow } = params;
     const lastDayNum = 7;
     const data = await getSchedule(ctx);
@@ -225,27 +254,21 @@ const runParse = async (params = {}) => {
     const title = data['SheduleTitle'];
     const minutes = date.getMinutes() + '';
     const minutesModified = minutes.length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
-    const dateToRender = isGetTomorow ? `На ${dayToRender['DayName']}` : `Станом на ${date.getHours()}:${minutesModified}`;
+    const dateToRender = isGetTomorow ? 'Завтра' : 'Сьогодні';
+    const scheduleText = isShowJustNoLight ? 'світла не буде' : 'графік такий'
     const isScheduleWasChanged = await getIsScheduleWasChanged(schedule);
 
     let message = isScheduleWasChanged && !isGetTomorow ? `Змінився графік погодинних відключень! \n` : '';
-    // message += `${title} \n`
-    // message = message.replace('<b>', '');
-    // message = message.replace('</b>', '');
-    message += `${dateToRender} графік такий: \n \n`;
-    message += parseSchedule(dayToRender);
+    message += `${dateToRender} ${scheduleText}: \n \n`;
+    message += parseSchedule({ dayToRender, isShowJustNoLight });
     message += '\nЯкщо графік зміниться, я повідомлю Вас про це.';
-    message += '\n\nКоманди:';
-    message += '\n/get - знову перевірити графік на сьогодні;';
-    message += '\n/getTomorow - графік відключень на завтра;';
-    message += '\n/stop - я не буду сповіщати Вас про зміну графіків.';
 
     if (isParseByCron) {
         if (isScheduleWasChanged) {
-            ctx.reply(message);
+            ctx.reply(message, buttons);
         }
     } else {
-        ctx.reply(message);
+        ctx.reply(message, buttons);
     }
 
     try {
@@ -255,10 +278,19 @@ const runParse = async (params = {}) => {
     }
 };
 
-bot.start((ctx) => ctx.reply('Привіт! Я бот, який підкаже графік погодинних відключень у садовому товаристві "Ятрань". Натисніть команду /get щоб дізнатися графік.'));
+bot.start((ctx) => ctx.reply('Привіт! Я бот, який підкаже графік погодинних відключень у садовому товаристві "Ятрань".',
+    {
+        reply_markup: {
+            inline_keyboard: [
+                [ { text: 'Дізнатися графік на сьогодні', callback_data: 'get' } ],
+            ]
+        }
+    }
+    ));
 
 let cronTask = null;
-bot.command('get', async ctx => {
+
+const parse = async ctx => {
     await runParse({ isParseByCron: false, ctx });
 
     if (!cronTask) {
@@ -266,17 +298,39 @@ bot.command('get', async ctx => {
             await runParse({ isParseByCron: true, ctx });
         });
     }
+};
+bot.command('get', async ctx => {
+    await parse(ctx);
+});
+bot.action('get', async (ctx) => {
+    await parse(ctx);
+});
+bot.action('getTomorow', async ctx => {
+    await runParse({ isParseByCron: false, ctx, isGetTomorow: true });
 });
 bot.command('getTomorow', async ctx => {
     await runParse({ isParseByCron: false, ctx, isGetTomorow: true });
 });
 
-bot.command('stop', async (ctx) => {
-    ctx.reply('Я припиняю слідкувати за змінами у графіках. Що б знову запустити мене, натисніть команду /get');
+const stopWatching = ctx => {
+    ctx.reply('Я припиняю слідкувати за змінами у графіках.', {
+        reply_markup: {
+            inline_keyboard: [
+                [ { text: 'Знову почати слідкувати за графіками', callback_data: 'get' } ],
+            ]
+        }
+    });
     if (cronTask) {
         cronTask.stop();
         cronTask = null;
     }
+};
+
+bot.action('stop', async (ctx) => {
+    stopWatching(ctx);
+});
+bot.command('stop', async (ctx) => {
+    stopWatching(ctx);
 });
 
 bot.launch();
