@@ -6,6 +6,8 @@ const cron = require('node-cron');
 const bot = new Telegraf('7288487795:AAGIeSjEzyoV9wejKTHg36thAm7BOyFIXF4');
 const url = 'https://kiroe.com.ua/electricity-blackout/websearch/v2/110686?ajax=1';
 
+const isTest = true;
+
 const time = {
     'H01': {
         start: '00:00',
@@ -150,13 +152,7 @@ const parseSchedule = ({ dayToRender, isShowJustNoLight }) => {
     let firstPeriod = '';
     let secondPeriod = '';
 
-    const hasNolight = Object.entries(time).some(([periodName,period]) => {
-        return !period.hasLight;
-    });
-
-    if (!hasNolight) {
-
-    }
+    let hasNoLight = false;
 
     Object.entries(time).forEach(([periodName,period]) => {
         const nextIndex = Object.keys(time).findIndex(name => name === periodName) + 1;
@@ -176,7 +172,10 @@ const parseSchedule = ({ dayToRender, isShowJustNoLight }) => {
 
             if (isShowJustNoLight) {
                 if (!period.hasLight) {
-                    message += `з ${firstPeriod} до ${secondPeriod} \n`
+                    message += `з ${firstPeriod} до ${secondPeriod} \n`;
+                    if (!hasNoLight) {
+                        hasNoLight = true;
+                    }
                 }
             } else {
                 const hasLightStr = period.hasLight ? '+ +' : '- - -';
@@ -188,11 +187,16 @@ const parseSchedule = ({ dayToRender, isShowJustNoLight }) => {
         }
     });
 
-    return message;
+    return { hasNoLight, message };
 };
 
 const getSchedule = async ctx => {
     try {
+        if (isTest) {
+            const dbContent = await fs.readFile('./test-db.json', { encoding: 'utf8' });
+            return {'Shedule': [JSON.parse(dbContent)]};
+        }
+
         const response = await fetch(url);
 
         if (response.ok) {
@@ -215,6 +219,10 @@ const getIsScheduleWasChanged = async schedule => {
 
         const today = schedule.find(day => day['IsToday']);
         const todayStr = JSON.stringify(today);
+
+        console.log(typeof dbContent, dbContent);
+        console.log(typeof todayStr, todayStr);
+        console.log(dataFromDb.DayName, today.DayName);
 
         return dbContent !== todayStr && dataFromDb.DayName === today.DayName;
     } catch (e) {
@@ -255,12 +263,19 @@ const runParse = async (params = {}) => {
     const minutes = date.getMinutes() + '';
     const minutesModified = minutes.length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
     const dateToRender = isGetTomorow ? 'Завтра' : 'Сьогодні';
-    const scheduleText = isShowJustNoLight ? 'світла не буде' : 'графік такий'
+    let scheduleText = isShowJustNoLight ? 'світла не буде:' : 'графік такий:';
+
     const isScheduleWasChanged = await getIsScheduleWasChanged(schedule);
+    const {
+        message: messageFromSchedule,
+        hasNoLight,
+    } = parseSchedule({ dayToRender, isShowJustNoLight });
+
+    scheduleText = hasNoLight ? scheduleText : 'відключень світла не буде.';
 
     let message = isScheduleWasChanged && !isGetTomorow ? `Змінився графік погодинних відключень! \n` : '';
-    message += `${dateToRender} ${scheduleText}: \n \n`;
-    message += parseSchedule({ dayToRender, isShowJustNoLight });
+    message += `${dateToRender} ${scheduleText} \n \n`;
+    message += messageFromSchedule;
     message += '\nЯкщо графік зміниться, я повідомлю Вас про це.';
 
     if (isParseByCron) {
@@ -294,7 +309,11 @@ const parse = async ctx => {
     await runParse({ isParseByCron: false, ctx });
 
     if (!cronTask) {
-        cronTask = cron.schedule('*/4 * * * *', async () => {
+        const coronSettings = isTest ? '*/1 * * * *' : '*/4 * * * *';
+        cronTask = cron.schedule(coronSettings, async () => {
+            if (isTest) {
+                ctx.reply('cron job is running');
+            }
             await runParse({ isParseByCron: true, ctx });
         });
     }
