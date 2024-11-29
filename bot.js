@@ -243,7 +243,6 @@ const runParse = async (params = {}) => {
     const isShowJustNoLight = true;
 
     const { isParseByCron, ctx, isGetTomorow } = params;
-    const lastDayNum = 7;
     const data = await getSchedule(ctx);
     const schedule = data['Shedule'];
     const today = schedule.find(day => day['IsToday']);
@@ -251,17 +250,9 @@ const runParse = async (params = {}) => {
 
     let dayToRender = today;
     if (isGetTomorow) {
-        if (tomorowDayNum === lastDayNum) {
-            ctx.reply('Пробачте. Я можу дати інформацію тільки в рамках цього тижня. З понеділка можна буде перевіряти графіки на наступний день.');
-            return;
-        }
         dayToRender = schedule.find(day => day['DayNo'] === (tomorowDayNum + 1));
     }
-
-    const date = new Date(data['SearchDate']);
-    const title = data['SheduleTitle'];
-    const minutes = date.getMinutes() + '';
-    const minutesModified = minutes.length === 1 ? `0${date.getMinutes()}` : date.getMinutes();
+    
     const dateToRender = isGetTomorow ? 'Завтра' : 'Сьогодні';
     let scheduleText = isShowJustNoLight ? 'світла не буде:' : 'графік такий:';
 
@@ -311,6 +302,7 @@ const parse = async ctx => {
     if (!cronTask) {
         const coronSettings = isTest ? '*/1 * * * *' : '*/4 * * * *';
         cronTask = cron.schedule(coronSettings, async () => {
+            console.log('cron job is running');
             if (isTest) {
                 ctx.reply('cron job is running');
             }
